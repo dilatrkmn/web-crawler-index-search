@@ -13,7 +13,7 @@ A localhost-runnable web crawler and search application built with **Flask**, **
 ### 1) Clone the repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/dilatrkmn/web-crawler-index-search.git
 cd web-crawler-index-search
 ```
 
