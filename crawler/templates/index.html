@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Local Web Crawler</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <div>
+          <h1>Local Web Crawler</h1>
+          <p>Flask + MySQL crawler/search dashboard for local development.</p>
+        </div>
+        <div class="header-actions">
+          <span class="welcome">Signed in as {{ username }}</span>
+          <form method="post" action="{{ url_for('logout') }}">
+            <button type="submit" class="secondary">Logout</button>
+          </form>
+        </div>
+      </header>
+
+      <section class="panel">
+        <h2>Start indexing</h2>
+        <form id="index-form">
+          <label>
+            Origin URL
+            <input type="url" name="origin" placeholder="https://example.com" required>
+          </label>
+          <label>
+            Max depth
+            <input type="number" name="depth" min="0" max="6" value="1" required>
+          </label>
+          <button type="submit">Start job</button>
+        </form>
+        <p id="index-message" class="message"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Search indexed pages</h2>
+        <form id="search-form">
+          <label>
+            Query
+            <input type="search" name="q" placeholder="example documentation">
+          </label>
+          <button type="submit">Search</button>
+        </form>
+        <div id="search-meta" class="message"></div>
+        <ol id="search-results" class="results"></ol>
+      </section>
+
+      <section class="panel">
+        <h2>Live system state</h2>
+        <div class="stats" id="stats"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Origin</th>
+              <th>Status</th>
+              <th>Depth</th>
+              <th>Queued</th>
+              <th>Active</th>
+              <th>Done</th>
+              <th>Failed</th>
+              <th>Indexed</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-table"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      async function fetchStatus() {
+        const response = await fetch('/api/status');
+        if (response.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        const status = await response.json();
+        const counters = status.counters || {};
+        document.getElementById('stats').innerHTML = `
+          <div class="stat-card"><strong>Queue</strong><span>${status.queue_depth} / ${status.queue_capacity}</span></div>
+          <div class="stat-card"><strong>Inflight</strong><span>${status.inflight}</span></div>
+          <div class="stat-card"><strong>Workers</strong><span>${status.max_workers}</span></div>
+          <div class="stat-card"><strong>RPS</strong><span>${status.requests_per_second}</span></div>
+          <div class="stat-card"><strong>Pages crawled</strong><span>${counters.pages_crawled || 0}</span></div>
+          <div class="stat-card"><strong>Failures</strong><span>${counters.pages_failed || 0}</span></div>
+          <div class="stat-card"><strong>Skipped duplicates</strong><span>${counters.pages_skipped || 0}</span></div>
+          <div class="stat-card"><strong>Backpressure waits</strong><span>${counters.backpressure_waits || 0}</span></div>
+        `;
+
+        const rows = (status.jobs || []).map(job => `
+          <tr>
+            <td>#${job.id}</td>
+            <td class="url">${job.origin_url}</td>
+            <td>${job.status}</td>
+            <td>${job.max_depth}</td>
+            <td>${job.queued_urls}</td>
+            <td>${job.active_urls}</td>
+            <td>${job.completed_urls}</td>
+            <td>${job.failed_urls}</td>
+            <td>${job.indexed_pages}</td>
+          </tr>
+        `).join('');
+        document.getElementById('jobs-table').innerHTML = rows || '<tr><td colspan="9">No jobs yet.</td></tr>';
+      }
+
+      document.getElementById('index-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const formData = new FormData(event.target);
+        const payload = {
+          origin: formData.get('origin'),
+          depth: Number(formData.get('depth'))
+        };
+        const response = await fetch('/api/index', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        document.getElementById('index-message').textContent = data.error || `Started job #${data.job_id}`;
+        if (response.ok) {
+          event.target.reset();
+          event.target.depth.value = 1;
+          fetchStatus();
+        }
+      });
+
+      document.getElementById('search-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const query = new FormData(event.target).get('q');
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const payload = await response.json();
+        document.getElementById('search-meta').textContent = `Matched ${payload.results.length} pages for terms: ${payload.terms.join(', ') || 'none'}`;
+        document.getElementById('search-results').innerHTML = payload.results.map(result => `
+          <li>
+            <a href="${result.relevant_url}" target="_blank" rel="noreferrer">${result.relevant_url}</a>
+            <div><strong>Origin:</strong> ${result.origin_url}</div>
+            <div><strong>Depth:</strong> ${result.depth} · <strong>Score:</strong> ${result.score}</div>
+            <div>${result.title || ''}</div>
+          </li>
+        `).join('') || '<li>No matches yet.</li>';
+      });
+
+      fetchStatus();
+      setInterval(fetchStatus, 2000);
+    </script>
+  </body>
+</html>
