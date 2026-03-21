@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import ssl
 import threading
 import time
 from urllib.error import HTTPError, URLError
@@ -108,9 +109,12 @@ class CrawlManager:
         content_type = None
         html = ''
         try:
+            import certifi
+
             self.rate_limiter.wait()
             request = Request(task.url, headers={'User-Agent': self.config['USER_AGENT']})
-            with urlopen(request, timeout=self.config['HTTP_TIMEOUT_SECONDS']) as response:
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            with urlopen(request, timeout=self.config['HTTP_TIMEOUT_SECONDS'], context=ssl_context) as response:
                 status_code = getattr(response, 'status', None)
                 content_type = response.headers.get('Content-Type', '')
                 raw_bytes = response.read(self.config['MAX_PAGE_BYTES'])

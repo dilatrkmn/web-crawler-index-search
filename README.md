@@ -29,6 +29,7 @@ source .venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+This installs the Flask stack plus `certifi`, which the crawler uses to validate HTTPS certificates consistently across local environments.
 
 ### 4) Start MySQL locally
 
@@ -39,7 +40,7 @@ You can use either Homebrew MySQL or Docker on macOS.
 ```bash
 brew install mysql
 brew services start mysql
-mysql -uroot -e "CREATE DATABASE web_crawler CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -uroot -e "DROP DATABASE IF EXISTS web_crawler; CREATE DATABASE web_crawler CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
 #### Option B: Docker MySQL
@@ -58,7 +59,17 @@ docker run --name crawler-mysql \
 cp .env.example .env
 ```
 
-Edit `.env` if needed. The default values are already set for a local demo.
+Edit `.env` if needed. The default values are already set for a local demo, including a default crawler user-agent:
+
+```env
+CRAWLER_USER_AGENT=LocalWebCrawler/1.0
+```
+
+If port `5000` is already in use on your machine, change:
+
+```env
+APP_PORT=5050
+```
 
 ### 6) Run the app
 
@@ -71,6 +82,7 @@ Open your browser at:
 ```text
 http://127.0.0.1:5000
 ```
+If you changed `APP_PORT`, open that port instead, e.g. `http://127.0.0.1:5050`.
 
 ### 7) Log in
 
@@ -113,6 +125,7 @@ This project implements a single-machine crawler/search system designed for the 
 - `html.parser.HTMLParser` for HTML parsing
 - `threading` for worker concurrency
 - `queue.Queue` for the bounded frontier queue
+- `ssl` + `certifi` for HTTPS certificate verification
 
 ### Testing
 
@@ -221,6 +234,61 @@ curl 'http://127.0.0.1:5000/api/status' -b cookies.txt
 ### `POST /api/shutdown`
 
 Stops background workers cleanly.
+
+---
+
+## Recommended Demo URLs
+
+For the fastest sanity check, start with:
+
+- `http://example.com` at depth `0` or `1`
+
+Then search for:
+
+- `example`
+
+Once that works, a richer HTTPS demo is:
+
+- `https://docs.python.org/3/` at depth `1`
+
+Then try queries such as:
+
+- `python`
+- `list`
+- `dictionary`
+- `string`
+
+---
+
+## Troubleshooting
+
+### 1) `KeyError: 'USER_AGENT'` or `'USER_AGENT'` in the `pages.error` column
+
+Make sure your `.env` contains:
+
+```env
+CRAWLER_USER_AGENT=LocalWebCrawler/1.0
+```
+
+The app now reads that value into `USER_AGENT` automatically.
+
+### 2) `SSL: CERTIFICATE_VERIFY_FAILED`
+
+The crawler uses `certifi` to provide a CA bundle for HTTPS requests. Reinstall dependencies if needed:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3) `127.0.0.1:5000` opens the wrong service or returns `403`
+
+Some macOS setups already use port `5000`. Set a different app port in `.env`, for example:
+
+```env
+APP_PORT=5050
+```
+
+Then restart the app and open `http://127.0.0.1:5050`.
 
 ---
 

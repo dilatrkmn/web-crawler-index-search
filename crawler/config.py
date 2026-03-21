@@ -35,4 +35,5 @@ DEFAULT_CONFIG = {
     'HTTP_TIMEOUT_SECONDS': int(os.getenv('CRAWLER_HTTP_TIMEOUT_SECONDS', '10')),
     'MAX_PAGE_BYTES': int(os.getenv('CRAWLER_MAX_PAGE_BYTES', '1000000')),
     'SAME_DOMAIN_ONLY': _as_bool(os.getenv('CRAWLER_SAME_DOMAIN_ONLY', 'true'), True),
+    'USER_AGENT': os.getenv('CRAWLER_USER_AGENT', 'LocalWebCrawler/1.0'),
 }
