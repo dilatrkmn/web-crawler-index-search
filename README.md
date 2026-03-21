@@ -300,6 +300,8 @@ web-crawler-index-search/
 ├── .env.example
 ├── requirements.txt
 ├── README.md
+├── product_prd.md
+├── recommendation.md
 ├── crawler/
 │   ├── app.py
 │   ├── config.py
