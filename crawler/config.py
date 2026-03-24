@@ -18,7 +18,7 @@ def _as_bool(value: str, default: bool) -> bool:
 DEFAULT_CONFIG = {
     'SECRET_KEY': os.getenv('SECRET_KEY', 'change-me'),
     'APP_HOST': os.getenv('APP_HOST', '127.0.0.1'),
-    'APP_PORT': int(os.getenv('APP_PORT', '5000')),
+    'APP_PORT': int(os.getenv('APP_PORT', '8000')),
     'DEBUG': _as_bool(os.getenv('FLASK_ENV'), False) and os.getenv('FLASK_ENV') == 'development',
     'APP_USERNAME': os.getenv('APP_USERNAME', 'admin'),
     'APP_PASSWORD': os.getenv('APP_PASSWORD', 'admin123'),

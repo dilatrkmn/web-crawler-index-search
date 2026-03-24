@@ -65,7 +65,7 @@ Edit `.env` if needed. The default values are already set for a local demo, incl
 CRAWLER_USER_AGENT=LocalWebCrawler/1.0
 ```
 
-If port `5000` is already in use on your machine, change:
+The default app port is set to `8000` to avoid common local conflicts on macOS (for example AirPlay/AirTunes services on `5000`). If `8000` is already in use on your machine, change:
 
 ```env
 APP_PORT=5050
@@ -80,7 +80,7 @@ python app.py
 Open your browser at:
 
 ```text
-http://127.0.0.1:5000
+http://127.0.0.1:8000
 ```
 If you changed `APP_PORT`, open that port instead, e.g. `http://127.0.0.1:5050`.
 
@@ -205,7 +205,7 @@ Starts a crawl job.
 Example:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/index \
+curl -X POST http://127.0.0.1:8000/api/index \
   -H 'Content-Type: application/json' \
   -b cookies.txt -c cookies.txt \
   -d '{"origin":"https://example.com","depth":1}'
@@ -218,7 +218,7 @@ Searches the indexed content.
 Example:
 
 ```bash
-curl 'http://127.0.0.1:5000/api/search?q=example' -b cookies.txt
+curl 'http://127.0.0.1:8000/api/search?q=example' -b cookies.txt
 ```
 
 ### `GET /api/status`
@@ -228,7 +228,7 @@ Returns current crawler state.
 Example:
 
 ```bash
-curl 'http://127.0.0.1:5000/api/status' -b cookies.txt
+curl 'http://127.0.0.1:8000/api/status' -b cookies.txt
 ```
 
 ### `POST /api/shutdown`
