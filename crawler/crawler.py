@@ -7,6 +7,8 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import certifi
+
 from .storage import FrontierTask, Storage
 from .utils import normalize_url, parse_html, same_domain, tokenize
 
@@ -31,18 +33,28 @@ class CrawlManager:
     def __init__(self, storage: Storage, config: dict):
         self.storage = storage
         self.config = config
-        self.queue: queue.Queue[FrontierTask] = queue.Queue(maxsize=config['MAX_QUEUE_SIZE'])
-        self.rate_limiter = RateLimiter(config['REQUESTS_PER_SECOND'])
+
+        self.queue: queue.Queue[FrontierTask | None] = queue.Queue(
+            maxsize=config.get("MAX_QUEUE_SIZE", 100)
+        )
+        self.rate_limiter = RateLimiter(config.get("REQUESTS_PER_SECOND", 1.0))
         self.stop_event = threading.Event()
         self.workers: list[threading.Thread] = []
         self.inflight_lock = threading.Lock()
         self.inflight = 0
+
+        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+
         self._start_workers()
         self._restore_pending_tasks()
 
     def _start_workers(self) -> None:
-        for index in range(self.config['MAX_WORKERS']):
-            worker = threading.Thread(target=self._worker_loop, name=f'crawler-worker-{index}', daemon=True)
+        for index in range(self.config.get("MAX_WORKERS", 4)):
+            worker = threading.Thread(
+                target=self._worker_loop,
+                name=f"crawler-worker-{index}",
+                daemon=True,
+            )
             worker.start()
             self.workers.append(worker)
 
@@ -52,6 +64,7 @@ class CrawlManager:
 
     def shutdown(self) -> None:
         self.stop_event.set()
+
         for _ in self.workers:
             while True:
                 try:
@@ -59,103 +72,182 @@ class CrawlManager:
                     break
                 except queue.Full:
                     continue
+
         for worker in self.workers:
             worker.join(timeout=2)
 
     def start_job(self, origin_url: str, max_depth: int) -> dict:
         normalized_origin = normalize_url(origin_url)
         if not normalized_origin:
-            raise ValueError('Origin URL must be a valid http/https URL.')
+            raise ValueError("Origin URL must be a valid http/https URL.")
+
         job_id = self.storage.create_job(origin_url, normalized_origin, max_depth)
         task = self.storage.reserve_url(job_id, origin_url, normalized_origin, 0, None)
+
         if task:
             self._put_task(task)
-        return {'job_id': job_id, 'origin_url': origin_url, 'max_depth': max_depth}
+
+        return {
+            "job_id": job_id,
+            "origin_url": origin_url,
+            "max_depth": max_depth,
+        }
 
     def _put_task(self, task: FrontierTask | None) -> None:
         if task is None:
             return
+
         while not self.stop_event.is_set():
             try:
                 self.queue.put(task, timeout=0.25)
                 return
             except queue.Full:
-                self.storage.increment_counter('backpressure_waits')
+                self.storage.increment_counter("backpressure_waits")
 
     def _worker_loop(self) -> None:
         while not self.stop_event.is_set():
-            task = self.queue.get()
+            try:
+                task = self.queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
             if task is None:
                 self.queue.task_done()
                 return
+
             with self.inflight_lock:
                 self.inflight += 1
+
             try:
                 self.storage.mark_frontier_processing(task.frontier_id)
                 succeeded = self._process_task(task)
+
                 if succeeded:
                     self.storage.mark_frontier_done(task.frontier_id)
+                else:
+                    # _process_task hata/skip durumlarını zaten storage'a yazıyor
+                    pass
+
             except Exception as exc:
                 self.storage.record_failure(task, None, None, str(exc))
                 self.storage.mark_frontier_failed(task.frontier_id)
+
             finally:
                 self.storage.complete_job_if_finished(task.job_id)
+
                 with self.inflight_lock:
                     self.inflight -= 1
+
                 self.queue.task_done()
 
     def _process_task(self, task: FrontierTask) -> bool:
         status_code = None
         content_type = None
-        html = ''
-        try:
-            import certifi
+        html = ""
 
+        try:
             self.rate_limiter.wait()
-            request = Request(task.url, headers={'User-Agent': self.config['USER_AGENT']})
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
-            with urlopen(request, timeout=self.config['HTTP_TIMEOUT_SECONDS'], context=ssl_context) as response:
-                status_code = getattr(response, 'status', None)
-                content_type = response.headers.get('Content-Type', '')
-                raw_bytes = response.read(self.config['MAX_PAGE_BYTES'])
-                html = raw_bytes.decode(response.headers.get_content_charset() or 'utf-8', errors='replace')
+
+            request = Request(
+                task.url,
+                headers={"User-Agent": self.config.get("USER_AGENT", "SimpleCrawler/1.0")},
+            )
+
+            with urlopen(
+                request,
+                timeout=self.config.get("HTTP_TIMEOUT_SECONDS", 5),
+                context=self.ssl_context,
+            ) as response:
+                status_code = getattr(response, "status", None)
+                content_type = response.headers.get("Content-Type", "")
+
+                raw_bytes = response.read(self.config.get("MAX_PAGE_BYTES", 500_000))
+                charset = response.headers.get_content_charset() or "utf-8"
+                html = raw_bytes.decode(charset, errors="replace")
+
         except HTTPError as exc:
-            self.storage.record_failure(task, exc.code, exc.headers.get('Content-Type'), str(exc))
+            self.storage.record_failure(
+                task,
+                exc.code,
+                exc.headers.get("Content-Type"),
+                str(exc),
+            )
             self.storage.mark_frontier_failed(task.frontier_id)
             return False
+
         except URLError as exc:
             self.storage.record_failure(task, status_code, content_type, str(exc))
             self.storage.mark_frontier_failed(task.frontier_id)
             return False
 
-        if 'html' not in (content_type or '').lower():
-            self.storage.record_failure(task, status_code, content_type, 'Skipped non-HTML content')
+        except Exception as exc:
+            self.storage.record_failure(task, status_code, content_type, str(exc))
+            self.storage.mark_frontier_failed(task.frontier_id)
+            return False
+
+        if "html" not in (content_type or "").lower():
+            self.storage.record_failure(
+                task,
+                status_code,
+                content_type,
+                "Skipped non-HTML content",
+            )
             self.storage.mark_frontier_failed(task.frontier_id)
             return False
 
         title, text, raw_links = parse_html(html)
+
         body_terms = tokenize(text)
         title_terms = tokenize(title)
+
         normalized_links = []
+
+        # Yeni kontrol parametreleri
+        max_links_per_page = self.config.get("MAX_LINKS_PER_PAGE", 10)
+        max_total_pages = self.config.get("MAX_TOTAL_PAGES", 200)
+
+        # Aynı sayfa içinde tekrar linkleri engelle
+        seen_links_on_page: set[str] = set()
+
         if task.depth < task.max_depth:
-            for raw_link in raw_links:
-                normalized = normalize_url(raw_link, task.url)
-                if not normalized:
-                    continue
-                if self.config['SAME_DOMAIN_ONLY'] and not same_domain(task.url, normalized):
-                    continue
-                normalized_links.append({'to_url': raw_link, 'normalized_to_url': normalized})
-                reserved = self.storage.reserve_url(
-                    task.job_id,
-                    normalized,
-                    normalized,
-                    task.depth + 1,
-                    task.normalized_url,
-                )
-                if reserved:
-                    self._put_task(reserved)
-                else:
-                    self.storage.increment_counter('pages_skipped')
+            pages_crawled_so_far = self.storage.get_status().get("pages_crawled", 0)
+
+            if pages_crawled_so_far < max_total_pages:
+                for raw_link in raw_links:
+                    if len(seen_links_on_page) >= max_links_per_page:
+                        break
+
+                    normalized = normalize_url(raw_link, task.url)
+                    if not normalized:
+                        continue
+
+                    if normalized in seen_links_on_page:
+                        continue
+
+                    if self.config.get("SAME_DOMAIN_ONLY", False):
+                        if not same_domain(task.url, normalized):
+                            continue
+
+                    seen_links_on_page.add(normalized)
+                    normalized_links.append(
+                        {
+                            "to_url": raw_link,
+                            "normalized_to_url": normalized,
+                        }
+                    )
+
+                    reserved = self.storage.reserve_url(
+                        task.job_id,
+                        normalized,
+                        normalized,
+                        task.depth + 1,
+                        task.normalized_url,
+                    )
+
+                    if reserved:
+                        self._put_task(reserved)
+                    else:
+                        self.storage.increment_counter("pages_skipped")
 
         self.storage.save_page(
             task=task,
@@ -168,23 +260,31 @@ class CrawlManager:
             body_terms=body_terms,
             title_terms=title_terms,
         )
+
         return True
 
     def status(self) -> dict:
         payload = self.storage.get_status()
-        payload['queue_depth'] = self.queue.qsize()
-        payload['queue_capacity'] = self.config['MAX_QUEUE_SIZE']
+        payload["queue_depth"] = self.queue.qsize()
+        payload["queue_capacity"] = self.config.get("MAX_QUEUE_SIZE", 100)
+
         with self.inflight_lock:
-            payload['inflight'] = self.inflight
-        payload['backpressure_active'] = payload['queue_depth'] >= self.config['MAX_QUEUE_SIZE']
-        payload['requests_per_second'] = self.config['REQUESTS_PER_SECOND']
-        payload['max_workers'] = self.config['MAX_WORKERS']
+            payload["inflight"] = self.inflight
+
+        payload["backpressure_active"] = (
+            payload["queue_depth"] >= self.config.get("MAX_QUEUE_SIZE", 100)
+        )
+        payload["requests_per_second"] = self.config.get("REQUESTS_PER_SECOND", 1.0)
+        payload["max_workers"] = self.config.get("MAX_WORKERS", 4)
+        payload["max_links_per_page"] = self.config.get("MAX_LINKS_PER_PAGE", 10)
+        payload["max_total_pages"] = self.config.get("MAX_TOTAL_PAGES", 200)
+
         return payload
 
     def search(self, query: str, limit: int = 50) -> dict:
         terms = list(tokenize(query).keys())
         return {
-            'query': query,
-            'terms': terms,
-            'results': self.storage.search(terms, limit=limit),
+            "query": query,
+            "terms": terms,
+            "results": self.storage.search(terms, limit=limit),
         }

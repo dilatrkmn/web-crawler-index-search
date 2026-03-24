@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     'DEBUG': _as_bool(os.getenv('FLASK_ENV'), False) and os.getenv('FLASK_ENV') == 'development',
     'APP_USERNAME': os.getenv('APP_USERNAME', 'admin'),
     'APP_PASSWORD': os.getenv('APP_PASSWORD', 'admin123'),
+
     'MYSQL_HOST': os.getenv('MYSQL_HOST', '127.0.0.1'),
     'MYSQL_PORT': int(os.getenv('MYSQL_PORT', '3306')),
     'MYSQL_DATABASE': os.getenv('MYSQL_DATABASE', 'web_crawler'),
@@ -29,11 +30,16 @@ DEFAULT_CONFIG = {
     'MYSQL_PASSWORD': os.getenv('MYSQL_PASSWORD', 'root'),
     'MYSQL_POOL_NAME': os.getenv('MYSQL_POOL_NAME', 'web_crawler_pool'),
     'MYSQL_POOL_SIZE': int(os.getenv('MYSQL_POOL_SIZE', '5')),
+
     'MAX_WORKERS': int(os.getenv('CRAWLER_MAX_WORKERS', '4')),
-    'MAX_QUEUE_SIZE': int(os.getenv('CRAWLER_MAX_QUEUE_SIZE', '200')),
+    'MAX_QUEUE_SIZE': int(os.getenv('CRAWLER_MAX_QUEUE_SIZE', '50')),
     'REQUESTS_PER_SECOND': float(os.getenv('CRAWLER_REQUESTS_PER_SECOND', '2.0')),
-    'HTTP_TIMEOUT_SECONDS': int(os.getenv('CRAWLER_HTTP_TIMEOUT_SECONDS', '10')),
-    'MAX_PAGE_BYTES': int(os.getenv('CRAWLER_MAX_PAGE_BYTES', '1000000')),
+    'HTTP_TIMEOUT_SECONDS': int(os.getenv('CRAWLER_HTTP_TIMEOUT_SECONDS', '5')),
+    'MAX_PAGE_BYTES': int(os.getenv('CRAWLER_MAX_PAGE_BYTES', '500000')),
+
     'SAME_DOMAIN_ONLY': _as_bool(os.getenv('CRAWLER_SAME_DOMAIN_ONLY', 'true'), True),
     'USER_AGENT': os.getenv('CRAWLER_USER_AGENT', 'LocalWebCrawler/1.0'),
+
+    'MAX_LINKS_PER_PAGE': int(os.getenv('CRAWLER_MAX_LINKS_PER_PAGE', '10')),
+    'MAX_TOTAL_PAGES': int(os.getenv('CRAWLER_MAX_TOTAL_PAGES', '100')),
 }
